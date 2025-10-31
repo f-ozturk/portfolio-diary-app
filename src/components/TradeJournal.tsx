@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Plus, ArrowUpRight, ArrowDownRight, Upload } from "lucide-react";
 import { AddTradeDialog } from "./AddTradeDialog";
+import { ImportTradesDialog } from "./ImportTradesDialog";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 interface Trade {
   id: string;
@@ -20,58 +23,78 @@ interface Trade {
 
 export const TradeJournal = () => {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock trades data
-  const trades: Trade[] = [
-    {
-      id: "1",
-      date: "2025-10-30",
-      symbol: "AAPL",
-      type: "long",
-      entry: 185.50,
-      exit: 189.25,
-      quantity: 100,
-      pnl: 375.00,
-      notes: "Breakout above resistance",
-    },
-    {
-      id: "2",
-      date: "2025-10-29",
-      symbol: "TSLA",
-      type: "short",
-      entry: 245.80,
-      exit: 242.10,
-      quantity: 50,
-      pnl: 185.00,
-    },
-    {
-      id: "3",
-      date: "2025-10-28",
-      symbol: "MSFT",
-      type: "long",
-      entry: 420.30,
-      exit: 418.90,
-      quantity: 25,
-      pnl: -35.00,
-      notes: "Stop loss hit",
-    },
-  ];
+  const fetchTrades = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('trades')
+        .select('*')
+        .order('entry_date', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      const formattedTrades: Trade[] = data.map(trade => ({
+        id: trade.id,
+        date: new Date(trade.entry_date).toISOString().split('T')[0],
+        symbol: trade.symbol,
+        type: trade.entry_quantity > 0 ? "long" : "short",
+        entry: trade.entry_price,
+        exit: trade.exit_price || trade.entry_price,
+        quantity: Math.abs(trade.entry_quantity),
+        pnl: trade.realized_pnl || 0,
+        notes: trade.notes,
+      }));
+
+      setTrades(formattedTrades);
+    } catch (error: any) {
+      console.error('Error fetching trades:', error);
+      toast.error("Failed to load trades");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTrades();
+  }, []);
 
   return (
     <Card className="border-border shadow-card">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
         <CardTitle>Recent Trades</CardTitle>
-        <Button
-          onClick={() => setIsAddDialogOpen(true)}
-          className="bg-gradient-primary hover:opacity-90"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          Add Trade
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={() => setIsImportDialogOpen(true)}
+            variant="outline"
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            Import
+          </Button>
+          <Button
+            onClick={() => setIsAddDialogOpen(true)}
+            className="bg-gradient-primary hover:opacity-90"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Trade
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {trades.map((trade) => (
+        {loading ? (
+          <div className="text-center py-8 text-muted-foreground">
+            Loading trades...
+          </div>
+        ) : trades.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            No trades yet. Import your IBKR statement or add trades manually.
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {trades.map((trade) => (
             <div
               key={trade.id}
               className="flex items-center justify-between rounded-lg border border-border bg-gradient-card p-4 transition-all duration-200 hover:shadow-card"
@@ -136,10 +159,16 @@ export const TradeJournal = () => {
                 </p>
               </div>
             </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </CardContent>
       <AddTradeDialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen} />
+      <ImportTradesDialog 
+        open={isImportDialogOpen} 
+        onOpenChange={setIsImportDialogOpen}
+        onImportComplete={fetchTrades}
+      />
     </Card>
   );
 };
